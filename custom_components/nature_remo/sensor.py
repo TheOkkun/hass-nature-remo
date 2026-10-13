@@ -181,7 +181,11 @@ class NatureRemoECHONETSensorBase(NatureRemoDeviceBase, SensorEntity):
     _unit: str | None = None
 
     def __init__(self, coordinator: DataUpdateCoordinator, appliance: Dict[str, Any]) -> None:
-        super().__init__(coordinator, appliance["device"])
+        device = appliance.get("device") or {
+            "id": appliance["id"],
+            "name": appliance.get("nickname") or appliance["id"],
+        }
+        super().__init__(coordinator, device)
         self._appliance_id = appliance["id"]
         self._name = f"Nature Remo {appliance['nickname']} {self._sensor_name}"
         self._attr_device_class = self._device_class
