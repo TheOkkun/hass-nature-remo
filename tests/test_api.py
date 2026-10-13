@@ -52,10 +52,20 @@ class FailingSession:
         raise ClientError("boom")
 
 
+class ECHONETUnavailableSession(FakeSession):
+    """Session where Nature Remo E data is not available."""
+
+    def request(self, method: str, url: str, **kwargs: Any) -> FakeResponse:
+        if url.endswith("/echonetlite/appliances"):
+            raise ClientError("not enabled")
+        return super().request(method, url, **kwargs)
+
+
 def test_get_fetches_appliances_and_devices() -> None:
     session = FakeSession(
         [{"id": "appliance-1"}],
         [{"id": "device-1"}],
+        {"appliances": [{"id": "echonet-appliance-1", "type": "EL_SOLAR_POWER"}]},
     )
     api = NatureRemoAPI("token", session)  # type: ignore[arg-type]
 
@@ -64,6 +74,12 @@ def test_get_fetches_appliances_and_devices() -> None:
     assert data == {
         "appliances": {"appliance-1": {"id": "appliance-1"}},
         "devices": {"device-1": {"id": "device-1"}},
+        "echonetlite_appliances": {
+            "echonet-appliance-1": {
+                "id": "echonet-appliance-1",
+                "type": "EL_SOLAR_POWER",
+            }
+        },
     }
     assert session.calls == [
         (
@@ -76,8 +92,24 @@ def test_get_fetches_appliances_and_devices() -> None:
             "https://api.nature.global/1/devices",
             {"headers": {"Authorization": "Bearer token"}},
         ),
+        (
+            "GET",
+            "https://api.nature.global/1/echonetlite/appliances",
+            {"headers": {"Authorization": "Bearer token"}},
+        ),
     ]
     assert all(response.raise_for_status_called for response in session.responses)
+
+
+def test_get_keeps_standard_data_when_echonet_endpoint_is_unavailable() -> None:
+    session = ECHONETUnavailableSession([{"id": "appliance-1"}], [{"id": "device-1"}])
+    api = NatureRemoAPI("token", session)  # type: ignore[arg-type]
+
+    data = asyncio.run(api.get())
+
+    assert data["appliances"] == {"appliance-1": {"id": "appliance-1"}}
+    assert data["devices"] == {"device-1": {"id": "device-1"}}
+    assert data["echonetlite_appliances"] == {}
 
 
 def test_post_returns_json_payload() -> None:

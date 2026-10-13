@@ -17,6 +17,22 @@ def test_parse_echonet_properties_accepts_numeric_strings() -> None:
     }
 
 
+def test_parse_echonet_hex_properties_and_signed_battery_power() -> None:
+    properties = echonet.parse_echonet_properties(
+        [
+            {"epc": "d3", "val": "ffffffd6"},
+            {"epc": "e4", "val": "5a"},
+        ],
+        hex_values=True,
+        signed_epcs=(echonet.EPC_BATTERY_INSTANTANEOUS_POWER,),
+    )
+
+    assert properties == {
+        echonet.EPC_BATTERY_INSTANTANEOUS_POWER: -42,
+        echonet.EPC_BATTERY_STATE_OF_CHARGE: 90,
+    }
+
+
 def test_calculate_cumulative_energy_applies_coefficient_and_unit() -> None:
     properties = {
         echonet.EPC_CUMULATIVE_CONSUMED_ENERGY: 123,

@@ -14,9 +14,13 @@ from propcache.api import cached_property
 
 from . import DOMAIN, NatureRemoBase, NatureRemoDeviceBase
 from .echonet import (
+    EPC_BATTERY_DETERIORATION,
+    EPC_BATTERY_INSTANTANEOUS_POWER,
+    EPC_BATTERY_STATE_OF_CHARGE,
     EPC_CUMULATIVE_CONSUMED_ENERGY,
     EPC_CUMULATIVE_RETURNED_ENERGY,
     EPC_MEASURED_INSTANTANEOUS_POWER,
+    EPC_SOLAR_INSTANTANEOUS_POWER,
     calculate_cumulative_energy,
     has_epc,
     parse_echonet_properties,
@@ -38,6 +42,7 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
+    echonet_appliances = coordinator.data.get("echonetlite_appliances", {})
     for appliance in appliances.values():
         if appliance["type"] == "EL_SMART_METER":
             entities.append(NatureRemoE(coordinator, appliance))
@@ -46,6 +51,19 @@ async def async_setup_entry(
                 entities.append(NatureRemoEnergySensor(coordinator, appliance))
             if has_epc(properties, EPC_CUMULATIVE_RETURNED_ENERGY):
                 entities.append(NatureRemoReturnedEnergySensor(coordinator, appliance))
+    for appliance in echonet_appliances.values():
+        properties = _echonet_appliance_properties(appliance)
+        if appliance["type"] == "EL_STORAGE_BATTERY":
+            if has_epc(properties, EPC_BATTERY_INSTANTANEOUS_POWER):
+                entities.append(NatureRemoBatteryPowerSensor(coordinator, appliance))
+            if has_epc(properties, EPC_BATTERY_STATE_OF_CHARGE):
+                entities.append(NatureRemoBatteryLevelSensor(coordinator, appliance))
+            if has_epc(properties, EPC_BATTERY_DETERIORATION):
+                entities.append(NatureRemoBatteryDeteriorationSensor(coordinator, appliance))
+        elif appliance["type"] == "EL_SOLAR_POWER" and has_epc(
+            properties, EPC_SOLAR_INSTANTANEOUS_POWER
+        ):
+            entities.append(NatureRemoSolarPowerSensor(coordinator, appliance))
     for device in devices.values():
         # skip devices that include in appliances
         if device["id"] in [appliance["device"]["id"] for appliance in appliances.values()]:
@@ -64,6 +82,18 @@ async def async_setup_entry(
 def _smart_meter_properties(appliance: Dict[str, Any]) -> dict[int, float]:
     """Return parsed ECHONET Lite properties for a smart meter appliance."""
     return parse_echonet_properties(appliance["smart_meter"]["echonetlite_properties"])
+
+
+def _echonet_appliance_properties(appliance: Dict[str, Any]) -> dict[int, float]:
+    """Return parsed properties from a Nature Remo E appliance."""
+    signed_epcs = (
+        (EPC_BATTERY_INSTANTANEOUS_POWER,)
+        if appliance["type"] == "EL_STORAGE_BATTERY"
+        else ()
+    )
+    return parse_echonet_properties(
+        appliance["properties"], hex_values=True, signed_epcs=signed_epcs
+    )
 
 
 class NatureRemoE(NatureRemoBase, SensorEntity):
@@ -139,6 +169,87 @@ class NatureRemoReturnedEnergySensor(NatureRemoCumulativeEnergySensorBase):
 
     def __init__(self, coordinator: DataUpdateCoordinator, appliance: Dict[str, Any]) -> None:
         super().__init__(coordinator, appliance)
+
+
+class NatureRemoECHONETSensorBase(NatureRemoDeviceBase, SensorEntity):
+    """Base for sensors backed by a Nature Remo E ECHONET property."""
+
+    _epc: int
+    _sensor_key: str
+    _sensor_name: str
+    _device_class: SensorDeviceClass | None = None
+    _unit: str | None = None
+
+    def __init__(self, coordinator: DataUpdateCoordinator, appliance: Dict[str, Any]) -> None:
+        super().__init__(coordinator, appliance["device"])
+        self._appliance_id = appliance["id"]
+        self._name = f"Nature Remo {appliance['nickname']} {self._sensor_name}"
+        self._attr_device_class = self._device_class
+        self._attr_native_unit_of_measurement = self._unit
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest ECHONET property value."""
+        appliance = self.coordinator.data.get("echonetlite_appliances", {}).get(
+            self._appliance_id
+        )
+        if appliance is None:
+            return None
+        try:
+            return _echonet_appliance_properties(appliance).get(self._epc)
+        except (KeyError, TypeError, ValueError) as err:
+            _LOGGER.warning("ECHONET sensor error for EPC %s: %s", self._epc, err)
+            return None
+
+    @property
+    def available(self) -> bool:
+        """Return whether the ECHONET property is available."""
+        appliance = self.coordinator.data.get("echonetlite_appliances", {}).get(
+            self._appliance_id
+        )
+        if appliance is None:
+            return False
+        try:
+            return has_epc(_echonet_appliance_properties(appliance), self._epc)
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    @cached_property
+    def unique_id(self) -> str | None:
+        """Return a stable ID unique to this appliance and property."""
+        return f"{self._appliance_id}-{self._sensor_key}"
+
+
+class NatureRemoBatteryPowerSensor(NatureRemoECHONETSensorBase):
+    _epc = EPC_BATTERY_INSTANTANEOUS_POWER
+    _sensor_key = "battery-power"
+    _sensor_name = "Battery Power"
+    _device_class = SensorDeviceClass.POWER
+    _unit = UnitOfPower.WATT
+
+
+class NatureRemoBatteryLevelSensor(NatureRemoECHONETSensorBase):
+    _epc = EPC_BATTERY_STATE_OF_CHARGE
+    _sensor_key = "battery-level"
+    _sensor_name = "Battery Level"
+    _device_class = SensorDeviceClass.BATTERY
+    _unit = PERCENTAGE
+
+
+class NatureRemoBatteryDeteriorationSensor(NatureRemoECHONETSensorBase):
+    _epc = EPC_BATTERY_DETERIORATION
+    _sensor_key = "battery-deterioration"
+    _sensor_name = "Battery Deterioration"
+    _unit = PERCENTAGE
+
+
+class NatureRemoSolarPowerSensor(NatureRemoECHONETSensorBase):
+    _epc = EPC_SOLAR_INSTANTANEOUS_POWER
+    _sensor_key = "solar-power"
+    _sensor_name = "Solar Power"
+    _device_class = SensorDeviceClass.POWER
+    _unit = UnitOfPower.WATT
 
 
 class NatureRemoTemperatureSensor(NatureRemoDeviceBase, SensorEntity):

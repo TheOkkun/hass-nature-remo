@@ -41,7 +41,9 @@ For Nature Remo E and E Lite:
 - Current power usage
 - Cumulative consumed energy
 - Cumulative returned energy, for solar panels and similar setups
-- Home Assistant Energy Dashboard metadata
+- Instantaneous solar generation power
+- Battery power, state of charge, and deterioration percentage
+- Home Assistant Energy Dashboard metadata for cumulative energy sensors
 
 ### IR appliances
 

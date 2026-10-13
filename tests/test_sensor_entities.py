@@ -3,9 +3,13 @@
 from typing import Any
 
 from custom_components.nature_remo.sensor import (
+    NatureRemoBatteryDeteriorationSensor,
+    NatureRemoBatteryLevelSensor,
+    NatureRemoBatteryPowerSensor,
     NatureRemoEnergySensor,
     NatureRemoHumiditySensor,
     NatureRemoIlluminanceSensor,
+    NatureRemoSolarPowerSensor,
     NatureRemoTemperatureSensor,
 )
 
@@ -78,3 +82,46 @@ def test_cumulative_energy_sensor_calculates_from_coordinator_data() -> None:
     ] = 110
 
     assert sensor.native_value == 22
+
+
+def test_battery_and_solar_sensors_parse_echonet_values() -> None:
+    device = {"id": "device-1", "name": "Remo E"}
+    battery = {
+        "id": "battery-1",
+        "nickname": "Battery",
+        "type": "EL_STORAGE_BATTERY",
+        "device": device,
+        "properties": [
+            {"epc": "d3", "val": "ffffffd6"},
+            {"epc": "e4", "val": "5a"},
+            {"epc": "e5", "val": "64"},
+        ],
+    }
+    solar = {
+        "id": "solar-1",
+        "nickname": "Solar",
+        "type": "EL_SOLAR_POWER",
+        "device": device,
+        "properties": [{"epc": "e0", "val": "12c"}],
+    }
+    coordinator = FakeCoordinator(
+        {"echonetlite_appliances": {"battery-1": battery, "solar-1": solar}}
+    )
+
+    battery_power = NatureRemoBatteryPowerSensor(coordinator, battery)  # type: ignore[arg-type]
+    battery_level = NatureRemoBatteryLevelSensor(coordinator, battery)  # type: ignore[arg-type]
+    battery_deterioration = NatureRemoBatteryDeteriorationSensor(
+        coordinator, battery
+    )  # type: ignore[arg-type]
+    solar_power = NatureRemoSolarPowerSensor(coordinator, solar)  # type: ignore[arg-type]
+
+    assert battery_power.unique_id == "battery-1-battery-power"
+    assert battery_power.native_value == -42
+    assert battery_level.native_value == 90
+    assert battery_level.native_unit_of_measurement == "%"
+    assert battery_deterioration.native_value == 100
+    assert solar_power.native_value == 300
+
+    coordinator.data["echonetlite_appliances"].pop("battery-1")
+    assert not battery_level.available
+    assert battery_level.native_value is None

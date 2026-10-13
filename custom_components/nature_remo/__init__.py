@@ -121,9 +121,20 @@ class NatureRemoAPI:
         except HomeAssistantError as err:
             raise UpdateFailed(f"Error communicating with Nature Remo API: {err}") from err
 
+        try:
+            echonet_response = await self._request_json("GET", "/echonetlite/appliances")
+        except HomeAssistantError as err:
+            _LOGGER.warning("Unable to fetch Nature Remo E appliances: %s", err)
+            echonet_response = {"appliances": []}
+
         appliances = {x["id"]: x for x in appliances_response}
         devices = {x["id"]: x for x in devices_response}
-        return {"appliances": appliances, "devices": devices}
+        echonet_appliances = {x["id"]: x for x in echonet_response["appliances"]}
+        return {
+            "appliances": appliances,
+            "devices": devices,
+            "echonetlite_appliances": echonet_appliances,
+        }
 
     async def post(self, path: str, data: Dict[str, Any]) -> Any:
         """Post any request."""
